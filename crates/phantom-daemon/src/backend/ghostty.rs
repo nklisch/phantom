@@ -18,6 +18,10 @@ use phantom_core::types::{
 
 use super::{Key, KeySpec, Mods, MouseAction, MouseButton, MouseSpec, Region, TerminalBackend};
 
+/// Width and height of one cell in the virtual pixel grid given to the mouse
+/// encoder.
+const MOUSE_CELL_PX: u32 = 10;
+
 pub struct GhosttyBackend {
     terminal: Terminal<'static, 'static>,
     render_state: RenderState<'static>,
@@ -27,6 +31,8 @@ pub struct GhosttyBackend {
     cell_iter: CellIterator<'static>,
     cols: u16,
     rows: u16,
+    /// The mouse button held since its press, for drag (button-event) motion.
+    held_button: Option<MouseButton>,
     /// Buffer for terminal responses (DA1, cursor position reports, etc.)
     /// Populated by the on_pty_write callback during vt_write, drained by `feed`.
     pty_write_buf: Rc<RefCell<Vec<u8>>>,
@@ -58,6 +64,7 @@ impl TerminalBackend for GhosttyBackend {
             cell_iter: CellIterator::new()?,
             cols,
             rows,
+            held_button: None,
             pty_write_buf,
         })
     }
@@ -304,7 +311,21 @@ impl TerminalBackend for GhosttyBackend {
             MouseAction::Release => mouse::Action::Release,
             MouseAction::Motion => mouse::Action::Motion,
         };
-        let button = spec.button.map(|b| match b {
+        let is_scroll = matches!(
+            spec.button,
+            Some(MouseButton::ScrollUp | MouseButton::ScrollDown)
+        );
+        match spec.action {
+            MouseAction::Press if !is_scroll => self.held_button = spec.button,
+            MouseAction::Release => self.held_button = None,
+            MouseAction::Press | MouseAction::Motion => {}
+        }
+        // A drag's motion reports the held button; `move` specs carry none.
+        let spec_button = match spec.action {
+            MouseAction::Motion => spec.button.or(self.held_button),
+            _ => spec.button,
+        };
+        let button = spec_button.map(|b| match b {
             MouseButton::Left => mouse::Button::Left,
             MouseButton::Right => mouse::Button::Right,
             MouseButton::Middle => mouse::Button::Middle,
@@ -312,15 +333,32 @@ impl TerminalBackend for GhosttyBackend {
             MouseButton::ScrollDown => mouse::Button::Five,
         });
 
-        self.mouse_encoder.set_options_from_terminal(&self.terminal);
+        // The encoder works in surface pixels and needs the renderer size to
+        // map them to cells; a headless terminal has no pixels, so describe a
+        // virtual grid of MOUSE_CELL_PX cells and aim at the centre of the
+        // requested 0-based cell (the alacritty backend's convention).
+        self.mouse_encoder
+            .set_options_from_terminal(&self.terminal)
+            .set_size(mouse::EncoderSize {
+                screen_width: u32::from(self.cols) * MOUSE_CELL_PX,
+                screen_height: u32::from(self.rows) * MOUSE_CELL_PX,
+                cell_width: MOUSE_CELL_PX,
+                cell_height: MOUSE_CELL_PX,
+                padding_top: 0,
+                padding_bottom: 0,
+                padding_right: 0,
+                padding_left: 0,
+            })
+            .set_any_button_pressed(self.held_button.is_some());
 
+        let cell_px = MOUSE_CELL_PX as f32;
         let mut event = mouse::Event::new()?;
         event
             .set_action(action)
             .set_button(button)
             .set_position(mouse::Position {
-                x: spec.x,
-                y: spec.y,
+                x: spec.x.max(0.0).floor() * cell_px + cell_px / 2.0,
+                y: spec.y.max(0.0).floor() * cell_px + cell_px / 2.0,
             })
             .set_mods(GMods::empty());
 
@@ -485,6 +523,52 @@ mod tests {
 
     fn key(key: Key, mods: Mods) -> KeySpec {
         KeySpec { key, mods }
+    }
+
+    fn mouse(action: MouseAction, button: Option<MouseButton>, x: f32, y: f32) -> MouseSpec {
+        MouseSpec {
+            action,
+            button,
+            x,
+            y,
+        }
+    }
+
+    fn backend(modes: &[u8]) -> GhosttyBackend {
+        let mut t = GhosttyBackend::new(80, 24, 0).unwrap();
+        t.feed(modes);
+        t
+    }
+
+    /// Mirrors the alacritty backend's mouse tests: both backends must send
+    /// children identical bytes for the same 0-based cell.
+    #[test]
+    fn no_mouse_mode_reports_nothing() {
+        let mut t = backend(b"");
+        let press = mouse(MouseAction::Press, Some(MouseButton::Left), 0.0, 0.0);
+        assert!(t.encode_mouse(&press).unwrap().is_empty());
+    }
+
+    #[test]
+    fn sgr_click_reports_press_and_release_at_the_requested_cell() {
+        let mut t = backend(b"\x1b[?1000h\x1b[?1006h");
+        let press = mouse(MouseAction::Press, Some(MouseButton::Left), 9.0, 4.0);
+        let release = mouse(MouseAction::Release, Some(MouseButton::Left), 9.0, 4.0);
+        assert_eq!(t.encode_mouse(&press).unwrap(), b"\x1b[<0;10;5M");
+        assert_eq!(t.encode_mouse(&release).unwrap(), b"\x1b[<0;10;5m");
+    }
+
+    #[test]
+    fn button_event_mode_reports_motion_only_while_a_button_is_held() {
+        let mut t = backend(b"\x1b[?1002h\x1b[?1006h");
+        let motion = |x| mouse(MouseAction::Motion, None, x, 4.0);
+        assert!(t.encode_mouse(&motion(3.0)).unwrap().is_empty());
+        let press = mouse(MouseAction::Press, Some(MouseButton::Left), 3.0, 4.0);
+        assert_eq!(t.encode_mouse(&press).unwrap(), b"\x1b[<0;4;5M");
+        assert_eq!(t.encode_mouse(&motion(6.0)).unwrap(), b"\x1b[<32;7;5M");
+        let release = mouse(MouseAction::Release, Some(MouseButton::Left), 6.0, 4.0);
+        assert_eq!(t.encode_mouse(&release).unwrap(), b"\x1b[<0;7;5m");
+        assert!(t.encode_mouse(&motion(8.0)).unwrap().is_empty());
     }
 
     /// The alacritty backend has the mirror of this test; the expected bytes
