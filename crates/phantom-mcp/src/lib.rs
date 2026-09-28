@@ -8,3 +8,10 @@
 pub mod observer;
 pub mod server;
 pub mod tmux;
+
+pub fn build_identity() -> phantom_core::protocol::BuildIdentity {
+    phantom_core::protocol::BuildIdentity {
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        commit: env!("PHANTOM_BUILD_COMMIT").to_string(),
+    }
+}

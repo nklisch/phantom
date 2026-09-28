@@ -18,6 +18,8 @@ async fn main() -> Result<()> {
         .init();
 
     tracing::info!("starting phantom-mcp");
+    let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+    let mut interrupt = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
 
     // Build the server (this spawns the engine thread).
     let server = PhantomMcpServer::new()?;
@@ -27,27 +29,64 @@ async fn main() -> Result<()> {
     // first tool call lands. The path can be overridden via PHANTOM_MCP_SOCKET.
     let socket_path = observer::resolve_socket_path();
     let (cmd_tx, waker) = server.engine_handle();
-    let _observer_handle = observer::serve(&socket_path, cmd_tx, waker).await?;
+    let shutdown_tx = cmd_tx.clone();
+    let shutdown_waker = waker.clone();
+    let _observer = observer::serve(&socket_path, cmd_tx, waker).await?;
     let server = server.with_observer_socket(socket_path.clone());
 
-    // Make sure we tear the socket file down on shutdown — both via Ctrl-C and
-    // via normal stdio EOF.
-    let cleanup_path = socket_path.clone();
-    tokio::spawn(async move {
-        let _ = tokio::signal::ctrl_c().await;
-        let _ = std::fs::remove_file(&cleanup_path);
-        std::process::exit(0);
-    });
+    let service = tokio::select! {
+        result = server.serve(stdio()) => match result {
+            Ok(service) => service,
+            Err(e) if e.to_string().contains("connection closed") => return Ok(()),
+            Err(e) => {
+                tracing::error!("serving error: {e}");
+                return Err(e.into());
+            }
+        },
+        _ = interrupt.recv() => {
+            tracing::info!("received interrupt signal");
+            exit_on_signal(&socket_path, &shutdown_tx, &shutdown_waker);
+        },
+        _ = terminate.recv() => {
+            tracing::info!("received termination signal");
+            exit_on_signal(&socket_path, &shutdown_tx, &shutdown_waker);
+        },
+    };
 
-    let service = server.serve(stdio()).await.inspect_err(|e| {
-        tracing::error!("serving error: {e}");
-    })?;
-
-    let result = service.waiting().await;
-
-    // Best-effort cleanup of the observer socket file.
-    let _ = std::fs::remove_file(&socket_path);
-
-    result?;
+    tokio::select! {
+        result = service.waiting() => {
+            let _ = result?;
+        },
+        _ = interrupt.recv() => {
+            tracing::info!("received interrupt signal");
+            exit_on_signal(&socket_path, &shutdown_tx, &shutdown_waker);
+        },
+        _ = terminate.recv() => {
+            tracing::info!("received termination signal");
+            exit_on_signal(&socket_path, &shutdown_tx, &shutdown_waker);
+        },
+    }
+    stop_engine(&shutdown_tx, &shutdown_waker);
     Ok(())
+}
+
+fn exit_on_signal(
+    socket_path: &std::path::Path,
+    cmd_tx: &crossbeam_channel::Sender<phantom_daemon::engine::EngineCommand>,
+    waker: &mio::Waker,
+) -> ! {
+    stop_engine(cmd_tx, waker);
+    let _ = std::fs::remove_file(socket_path);
+    // Tokio's stdio transport owns a blocking stdin read. It cannot be
+    // cancelled while the parent keeps stdin open, so terminate after the
+    // engine and socket have been cleaned up explicitly.
+    std::process::exit(0)
+}
+
+fn stop_engine(
+    cmd_tx: &crossbeam_channel::Sender<phantom_daemon::engine::EngineCommand>,
+    waker: &mio::Waker,
+) {
+    let _ = cmd_tx.send(phantom_daemon::engine::EngineCommand::Shutdown);
+    let _ = waker.wake();
 }

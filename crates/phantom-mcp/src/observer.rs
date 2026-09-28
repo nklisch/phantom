@@ -14,7 +14,6 @@ use crossbeam_channel::Sender;
 use mio::Waker;
 use phantom_daemon::engine::EngineCommand;
 use phantom_daemon::handler;
-use tokio::net::UnixListener;
 use tokio::task::JoinHandle;
 
 /// Default observer socket path: `$XDG_RUNTIME_DIR/phantom-mcp-$PID.sock`
@@ -46,20 +45,30 @@ pub fn resolve_socket_path() -> PathBuf {
 /// Returns the spawned task handle. The bind happens synchronously inside
 /// this function so callers can be sure the socket file exists by the time
 /// `serve` returns.
+pub struct Observer {
+    path: PathBuf,
+    handle: JoinHandle<()>,
+}
+
+impl Drop for Observer {
+    fn drop(&mut self) {
+        self.handle.abort();
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
 pub async fn serve(
     socket_path: &Path,
     cmd_tx: Sender<EngineCommand>,
     waker: Arc<Waker>,
-) -> Result<JoinHandle<()>> {
+) -> Result<Observer> {
     if let Some(parent) = socket_path.parent() {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("creating socket directory {}", parent.display()))?;
     }
-    // Stale socket cleanup — same logic the daemon uses.
-    let _ = std::fs::remove_file(socket_path);
-
-    let listener = UnixListener::bind(socket_path)
+    let listener = phantom_daemon::listener::bind(socket_path)
         .with_context(|| format!("binding observer socket at {}", socket_path.display()))?;
+    let build = phantom_daemon::build_identity();
 
     tracing::info!("observer socket listening on {}", socket_path.display());
 
@@ -69,8 +78,11 @@ pub async fn serve(
                 Ok((stream, _addr)) => {
                     let cmd_tx = cmd_tx.clone();
                     let waker = Arc::clone(&waker);
+                    let build = build.clone();
                     tokio::spawn(async move {
-                        if let Err(e) = handler::handle_connection(stream, cmd_tx, waker).await {
+                        if let Err(e) =
+                            handler::handle_connection(stream, cmd_tx, waker, build, None).await
+                        {
                             tracing::warn!("observer connection error: {e}");
                         }
                     });
@@ -85,7 +97,10 @@ pub async fn serve(
         }
     });
 
-    Ok(handle)
+    Ok(Observer {
+        path: socket_path.to_path_buf(),
+        handle,
+    })
 }
 
 #[cfg(test)]

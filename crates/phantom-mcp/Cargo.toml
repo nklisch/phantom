@@ -39,3 +39,5 @@ base64 = "0.22"
 
 [dev-dependencies]
 image = { version = "0.25", default-features = false, features = ["png"] }
+nix.workspace = true
+tempfile = "3"
