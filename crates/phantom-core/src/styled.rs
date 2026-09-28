@@ -60,6 +60,7 @@ impl Style {
 ///
 /// Row text is JSON-escaped. Style ranges are half-open captured-cell indices;
 /// default cells are omitted and adjacent cells with the same style are one run.
+/// Rows with no text and no styled cells are omitted.
 pub fn format(screen: &ScreenContent) -> String {
     let mut out = format!(
         "screen {}x{}\ncursor {},{} {}",
@@ -88,14 +89,7 @@ pub fn format(screen: &ScreenContent) -> String {
                 .map(|cell| cell.grapheme.as_str())
                 .collect()
         };
-        write!(
-            out,
-            "\nrow {}: {}",
-            row.row,
-            serde_json::to_string(&text).expect("serializing a string cannot fail")
-        )
-        .unwrap();
-
+        let mut runs = String::new();
         let mut start = 0;
         while start < row.cells.len() {
             let style = Style::from_cell(&row.cells[start]);
@@ -104,11 +98,23 @@ pub fn format(screen: &ScreenContent) -> String {
                 end += 1;
             }
             if !style.is_default() {
-                write!(out, "\n  {start}..{end}").unwrap();
-                style.write_to(&mut out);
+                write!(runs, "\n  {start}..{end}").unwrap();
+                style.write_to(&mut runs);
             }
             start = end;
         }
+        // Blank, unstyled rows carry nothing; omitting them keeps a mostly
+        // empty screen cheap to read.
+        if text.is_empty() && runs.is_empty() {
+            continue;
+        }
+        write!(
+            out,
+            "\nrow {}: {}{runs}",
+            row.row,
+            serde_json::to_string(&text).expect("serializing a string cannot fail")
+        )
+        .unwrap();
     }
 
     out
@@ -196,7 +202,7 @@ mod tests {
         all_attributes.faint = true;
         let screen = ScreenContent {
             cols: 8,
-            rows: 2,
+            rows: 3,
             cursor: CursorInfo {
                 x: 3,
                 y: 1,
@@ -212,6 +218,11 @@ mod tests {
                 },
                 RowContent {
                     row: 1,
+                    text: "   ".into(),
+                    cells: vec![],
+                },
+                RowContent {
+                    row: 2,
                     text: "quote: \"   ".into(),
                     cells: vec![],
                 },
@@ -220,7 +231,7 @@ mod tests {
 
         assert_eq!(
             format(&screen),
-            "screen 8x2\ncursor 3,1 hidden\nrow 0: \"AA C\"\n  0..2 fg=#aa0000 bold\n  3..4 bg=#a1b2c3 italic underline strikethrough inverse dim\nrow 1: \"quote: \\\"\""
+            "screen 8x3\ncursor 3,1 hidden\nrow 0: \"AA C\"\n  0..2 fg=#aa0000 bold\n  3..4 bg=#a1b2c3 italic underline strikethrough inverse dim\nrow 2: \"quote: \\\"\""
         );
     }
 }

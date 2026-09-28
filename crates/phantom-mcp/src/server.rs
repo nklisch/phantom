@@ -393,8 +393,9 @@ impl PhantomMcpServer {
 
     #[tool(description = "Capture the current screen of a session. \
                        `format=text` returns plain text rows joined by newlines. \
-                       `format=styled` returns a compact screen/cursor header, each row as \
-                       JSON-escaped text, and only non-default style runs. Runs are half-open \
+                       `format=styled` returns a compact screen/cursor header, each non-blank row as \
+                       JSON-escaped text (blank, unstyled rows are omitted), and only non-default \
+                       style runs. Runs are half-open \
                        captured-row-relative cell ranges with fg/bg as #rrggbb and any of bold, \
                        italic, underline, strikethrough, inverse, or dim. Use it to verify color \
                        and emphasis without an image. \

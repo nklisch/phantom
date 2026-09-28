@@ -197,7 +197,7 @@ Tools exposed: `phantom_run`, `phantom_send`, `phantom_wait`, `phantom_screensho
 
 ### Styled screenshots
 
-`--format styled` preserves color and emphasis without the token cost of a PNG. Its line-oriented format starts with the full screen size and absolute cursor position/visibility, then gives every captured row as a JSON-escaped string. Indented lines are non-default style runs:
+`--format styled` preserves color and emphasis without the token cost of a PNG. Its line-oriented format starts with the full screen size and absolute cursor position/visibility, then gives every captured row that has text or styling as a JSON-escaped string (blank, unstyled rows are omitted). Indented lines are non-default style runs:
 
 ```text
 screen 80x24
