@@ -81,7 +81,7 @@ enum Commands {
         /// Session name
         #[arg(short, long, required = true)]
         session: String,
-        /// Output format: text, json, html, or image (PNG)
+        /// Output format: text, styled, json, html, or image (PNG)
         #[arg(long, default_value = "text")]
         format: String,
         /// Region to capture: top,left,bottom,right (0-indexed)

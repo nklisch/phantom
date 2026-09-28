@@ -122,7 +122,7 @@ pub struct CursorPos {
 pub struct ScreenshotArgs {
     /// Session name.
     pub session: String,
-    /// `text` for plain text rows, `image` for a rendered PNG of the screen.
+    /// `text` for plain rows, `styled` for text plus style runs, or `image` for PNG.
     #[serde(default = "default_screenshot_format")]
     pub format: String,
     /// Optional region to capture (top/left/bottom/right, 0-indexed, inclusive).
@@ -392,10 +392,12 @@ impl PhantomMcpServer {
     }
 
     #[tool(description = "Capture the current screen of a session. \
-                       `format=text` returns plain text rows joined by newlines — it strips all \
-                       color and styling, so use `format=image` whenever color carries meaning: \
-                       colored status/error indicators, syntax highlighting, diffs (red/green), \
-                       or anything else you need to visually understand (layout, cursor placement). \
+                       `format=text` returns plain text rows joined by newlines. \
+                       `format=styled` returns a compact screen/cursor header, each row as \
+                       JSON-escaped text, and only non-default style runs. Runs are half-open \
+                       captured-row-relative cell ranges with fg/bg as #rrggbb and any of bold, \
+                       italic, underline, strikethrough, inverse, or dim. Use it to verify color \
+                       and emphasis without an image. \
                        `format=image` returns a PNG rendering of the terminal. \
                        `region` (top/left/bottom/right, 0-indexed inclusive) restricts the capture \
                        to a sub-rectangle of the screen.")]
@@ -429,6 +431,18 @@ impl PhantomMcpServer {
                     screen.text().to_string(),
                 )]))
             }
+            "styled" => {
+                let screen = if let Some(r) = args.region {
+                    session
+                        .screenshot_region_json(r.top, r.left, r.bottom, r.right)
+                        .map_err(to_mcp_err)?
+                } else {
+                    session.screenshot_json().map_err(to_mcp_err)?
+                };
+                Ok(CallToolResult::success(vec![Content::text(
+                    phantom_core::styled::format(&screen),
+                )]))
+            }
             "image" => {
                 let region_tuple = args
                     .region
@@ -452,7 +466,7 @@ impl PhantomMcpServer {
                 )]))
             }
             other => Err(McpError::invalid_params(
-                format!("unknown screenshot format '{other}' (expected text or image)"),
+                format!("unknown screenshot format '{other}' (expected text, styled, or image)"),
                 None,
             )),
         }
@@ -613,8 +627,8 @@ impl ServerHandler for PhantomMcpServer {
                  \n  2. phantom_show right after phantom_run, so tmux users get a live viewer \
                  \n     pane; this is a no-op for non-tmux users so always call it \
                  \n  3. phantom_wait (stable_ms or text) until the UI is ready \
-                 \n  4. phantom_screenshot (use format='image' for visual grounding or \
-                 \n     whenever color carries meaning — status indicators, syntax highlighting, diffs) \
+                 \n  4. phantom_screenshot (use format='styled' to inspect color and emphasis \
+                 \n     compactly, or format='image' for full visual grounding) \
                  \n  5. phantom_send to type text or press keys \
                  \n  6. repeat 3–5 \
                  \n  7. phantom_kill when done \

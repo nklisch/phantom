@@ -117,6 +117,7 @@ mod serde_regex {
 #[serde(rename_all = "snake_case")]
 pub enum ScreenFormat {
     Text,
+    Styled,
     Json,
     Html,
 }

@@ -122,7 +122,7 @@ impl TerminalBackend for GhosttyBackend {
                 if in_region {
                     text.push_str(&grapheme_str);
 
-                    if matches!(format, ScreenFormat::Json) {
+                    if matches!(format, ScreenFormat::Json | ScreenFormat::Styled) {
                         let style = cell.style()?;
                         let fg = cell.fg_color()?.map(|c| rgb_to_hex(&c));
                         let bg = cell.bg_color()?.map(|c| rgb_to_hex(&c));

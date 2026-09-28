@@ -70,6 +70,7 @@ pt send -s NAME --mouse click:10,5      # Mouse events
 
 # Screen
 pt screenshot -s NAME                   # Plain text
+pt screenshot -s NAME --format styled   # Text plus compact color/style runs
 pt screenshot -s NAME --format json     # Full cell data (grapheme, colors, attrs)
 pt screenshot -s NAME --region 0,0,5,40 # Capture a region
 pt cursor -s NAME                       # Cursor position and style
@@ -192,7 +193,21 @@ Then point your MCP client at the binary:
 { "mcpServers": { "phantom": { "command": "/abs/path/to/target/release/phantom-mcp" } } }
 ```
 
-Tools exposed: `phantom_run`, `phantom_send`, `phantom_wait`, `phantom_screenshot` (text or PNG image, with optional region), `phantom_show`, `phantom_cursor`, `phantom_cell`, `phantom_scrollback`, `phantom_output`, `phantom_status`, `phantom_list`, `phantom_resize`, `phantom_kill`. See [`crates/phantom-mcp/README.md`](crates/phantom-mcp/README.md) for the full reference.
+Tools exposed: `phantom_run`, `phantom_send`, `phantom_wait`, `phantom_screenshot` (plain text, compact styled text, or PNG image, with optional region), `phantom_show`, `phantom_cursor`, `phantom_cell`, `phantom_scrollback`, `phantom_output`, `phantom_status`, `phantom_list`, `phantom_resize`, `phantom_kill`. See [`crates/phantom-mcp/README.md`](crates/phantom-mcp/README.md) for the full reference.
+
+### Styled screenshots
+
+`--format styled` preserves color and emphasis without the token cost of a PNG. Its line-oriented format starts with the full screen size and absolute cursor position/visibility, then gives every captured row as a JSON-escaped string. Indented lines are non-default style runs:
+
+```text
+screen 80x24
+cursor 9,1 visible
+row 0: "plain red bold"
+  6..9 fg=#aa0000
+  10..14 fg=#aa0000 bold
+```
+
+Run ranges are half-open captured-row-relative cell indices (`start..end`), including in a regional capture. Foreground (`fg`) and background (`bg`) colors are lowercase `#rrggbb`; flags are `bold`, `italic`, `underline`, `strikethrough`, `inverse`, and `dim`. Adjacent cells with identical styles share a run, and default styling is omitted. Row numbers and the cursor remain absolute screen coordinates. `--region top,left,bottom,right` uses 0-indexed inclusive bounds.
 
 ## Exit Codes
 

@@ -333,6 +333,31 @@ fn json_screenshot_has_cell_data() {
 }
 
 #[test]
+fn styled_screenshot_reports_color_and_emphasis() {
+    let pt = Phantom::new().unwrap();
+    let s = pt
+        .run("bash")
+        .args(&[
+            "-c",
+            "printf '\\033[38;2;17;34;51mplain\\033[1mbold\\033[0m\\n'; sleep 1",
+        ])
+        .size(20, 3)
+        .start()
+        .unwrap();
+    s.wait().text("plainbold").until().unwrap();
+
+    let full = s.screenshot_styled().unwrap();
+    assert!(full.contains("row 0: \"plainbold\""), "{full}");
+    assert!(full.contains("  0..5 fg=#112233"), "{full}");
+    assert!(full.contains("  5..9 fg=#112233 bold"), "{full}");
+
+    let region = s.screenshot_region_styled(0, 2, 0, 7).unwrap();
+    assert!(region.contains("row 0: \"ainbol\""), "{region}");
+    assert!(region.contains("  0..3 fg=#112233"), "{region}");
+    assert!(region.contains("  3..6 fg=#112233 bold"), "{region}");
+}
+
+#[test]
 fn region_screenshot() {
     let pt = Phantom::new().unwrap();
     let s = bash_ready(&pt);

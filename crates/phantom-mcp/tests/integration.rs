@@ -131,6 +131,42 @@ async fn run_send_screenshot_kill_roundtrip() {
         .expect("screenshot");
     assert!(text_of(&r).contains("phantom-mcp-works"));
 
+    server
+        .phantom_send(rmcp::handler::server::wrapper::Parameters(SendArgs {
+            session: "rt1".into(),
+            kind: "text".into(),
+            value: "printf '\\033[38;2;17;34;51;1mMCPSTYLE\\033[0m\\n'\n".into(),
+        }))
+        .await
+        .expect("send styled output");
+    server
+        .phantom_wait(rmcp::handler::server::wrapper::Parameters(WaitArgs {
+            session: "rt1".into(),
+            text: Some("MCPSTYLE".into()),
+            text_absent: None,
+            regex: None,
+            stable_ms: None,
+            process_exit: None,
+            exit_code: None,
+            cursor_at: None,
+            cursor_visible: None,
+            screen_changed: None,
+            timeout_ms: 3_000,
+        }))
+        .await
+        .expect("wait styled output");
+    let r = server
+        .phantom_screenshot(rmcp::handler::server::wrapper::Parameters(ScreenshotArgs {
+            session: "rt1".into(),
+            format: "styled".into(),
+            region: None,
+        }))
+        .await
+        .expect("screenshot styled");
+    let styled = text_of(&r);
+    assert!(styled.contains("\"MCPSTYLE"), "{styled}");
+    assert!(styled.contains("fg=#112233 bold"), "{styled}");
+
     // Image screenshot — must be a valid PNG.
     let r = server
         .phantom_screenshot(rmcp::handler::server::wrapper::Parameters(ScreenshotArgs {

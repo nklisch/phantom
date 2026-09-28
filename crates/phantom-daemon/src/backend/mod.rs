@@ -120,8 +120,8 @@ pub trait TerminalBackend {
 
     fn resize(&mut self, cols: u16, rows: u16) -> Result<()>;
 
-    /// Capture the active screen. Per-cell attributes are only filled in for
-    /// [`ScreenFormat::Json`]; other formats just need the text.
+    /// Capture the active screen. Per-cell attributes are filled in for
+    /// [`ScreenFormat::Json`] and [`ScreenFormat::Styled`].
     fn capture(&mut self, format: &ScreenFormat, region: Option<Region>) -> Result<ScreenContent>;
 
     /// The active screen as plain text, one line per row, rows joined by `\n`.

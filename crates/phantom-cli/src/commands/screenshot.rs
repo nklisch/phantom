@@ -17,11 +17,12 @@ pub async fn execute(
     let is_image = format == "image";
     let fmt = match format.as_str() {
         "text" => ScreenFormat::Text,
+        "styled" => ScreenFormat::Styled,
         "json" => ScreenFormat::Json,
         "html" => ScreenFormat::Html,
         // Image rendering needs per-cell color/style data, same as JSON.
         "image" => ScreenFormat::Json,
-        _ => anyhow::bail!("Invalid format: {format}. Use text, json, html, or image"),
+        _ => anyhow::bail!("Invalid format: {format}. Use text, styled, json, html, or image"),
     };
 
     let region = match region {
@@ -94,6 +95,7 @@ fn print_screen(screen: &ScreenContent, format: &ScreenFormat, _output: OutputMo
                 println!("{}", row.text);
             }
         }
+        ScreenFormat::Styled => println!("{}", phantom_core::styled::format(screen)),
         ScreenFormat::Json | ScreenFormat::Html => {
             println!("{}", serde_json::to_string_pretty(screen).unwrap());
         }

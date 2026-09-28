@@ -70,6 +70,20 @@ impl Session {
         }
     }
 
+    /// Take a compact text screenshot with non-default style runs.
+    pub fn screenshot_styled(&self) -> crate::Result<String> {
+        let resp = self.inner.send_command(|reply| EngineCommand::Screenshot {
+            session: self.name.clone(),
+            format: ScreenFormat::Styled,
+            region: None,
+            reply,
+        })?;
+        match response_to_result(resp)? {
+            Some(ResponseData::Screen(screen)) => Ok(phantom_core::styled::format(&screen)),
+            _ => panic!("unexpected response from screenshot"),
+        }
+    }
+
     /// Take a screenshot of a specific region (top, left, bottom, right — 0-indexed, inclusive).
     pub fn screenshot_region(
         &self,
@@ -106,6 +120,26 @@ impl Session {
         })?;
         match response_to_result(resp)? {
             Some(ResponseData::Screen(screen)) => Ok(screen),
+            _ => panic!("unexpected response from screenshot"),
+        }
+    }
+
+    /// Take a compact styled screenshot of a region.
+    pub fn screenshot_region_styled(
+        &self,
+        top: u16,
+        left: u16,
+        bottom: u16,
+        right: u16,
+    ) -> crate::Result<String> {
+        let resp = self.inner.send_command(|reply| EngineCommand::Screenshot {
+            session: self.name.clone(),
+            format: ScreenFormat::Styled,
+            region: Some((top, left, bottom, right)),
+            reply,
+        })?;
+        match response_to_result(resp)? {
+            Some(ResponseData::Screen(screen)) => Ok(phantom_core::styled::format(&screen)),
             _ => panic!("unexpected response from screenshot"),
         }
     }

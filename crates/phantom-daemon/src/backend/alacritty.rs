@@ -157,7 +157,7 @@ impl TerminalBackend for AlacrittyBackend {
     fn capture(&mut self, format: &ScreenFormat, region: Option<Region>) -> Result<ScreenContent> {
         let cursor = self.cursor();
         let title = self.title();
-        let want_cells = matches!(format, ScreenFormat::Json);
+        let want_cells = matches!(format, ScreenFormat::Json | ScreenFormat::Styled);
 
         let mut rows = Vec::new();
         for row_idx in 0..self.rows {

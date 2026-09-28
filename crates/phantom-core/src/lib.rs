@@ -9,6 +9,7 @@
 
 pub mod exit_codes;
 pub mod protocol;
+pub mod styled;
 pub mod types;
 
 #[cfg(feature = "render")]

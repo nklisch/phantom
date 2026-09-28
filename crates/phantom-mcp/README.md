@@ -51,7 +51,7 @@ Same shape — point `command` at the absolute path to the `phantom-mcp` binary.
 | `phantom_show` | Open a live viewer pane next to the user's chat (tmux only; no-op elsewhere) |
 | `phantom_send` | Send input — `text`, `key` (`enter`, `ctrl-c`, `f1`, …), `paste`, `mouse` |
 | `phantom_wait` | Block until conditions hold: `text`, `text_absent`, `regex`, `stable_ms`, `process_exit`, `exit_code`, `cursor_at`, `cursor_visible`, `screen_changed` |
-| `phantom_screenshot` | Capture the screen as `text` or as a rendered PNG `image`. Supports an optional `region` rectangle. |
+| `phantom_screenshot` | Capture the screen as plain `text`, compact `styled` text, or a rendered PNG `image`. Supports an optional `region` rectangle. |
 | `phantom_cursor` | Get cursor position and visibility |
 | `phantom_cell` | Inspect a single cell (grapheme + style attrs) |
 | `phantom_scrollback` | Dump the scrollback buffer as text |
@@ -122,7 +122,7 @@ The socket file is removed when phantom-mcp exits.
 
 1. `phantom_run` — spawn the program
 2. `phantom_wait` with `stable_ms: 300` — let the UI settle
-3. `phantom_screenshot` with `format: "image"` — visual grounding
+3. `phantom_screenshot` with `format: "styled"` for compact color/style checks or `format: "image"` for full visual grounding
 4. `phantom_send` — type or press keys
 5. `phantom_wait` with `text:` or `stable_ms:` — let the redraw finish
 6. Repeat 3–5
@@ -132,6 +132,8 @@ The server's `instructions` field tells the model this same flow on
 initialize, so well-behaved clients will follow it without prompting.
 
 ## Image rendering
+
+For model-readable color without an image, `format: "styled"` returns the format documented under [Styled screenshots](../../README.md#styled-screenshots): JSON-escaped row text with only non-default, half-open style runs. It includes foreground/background colors as hex, emphasis flags, and cursor position/visibility, and supports the same `region` rectangle.
 
 Screenshots requested with `format: "image"` are rendered to PNG by
 `phantom-core`'s `render` module (feature-gated), using
