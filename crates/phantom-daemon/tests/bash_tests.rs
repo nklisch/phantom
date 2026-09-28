@@ -87,6 +87,42 @@ fn test_send_key_ctrl_c() {
 }
 
 #[test]
+fn test_ctrl_letter_keys_send_control_bytes() {
+    let h = TestHarness::new();
+    let probe = r#"import os, tty
+tty.setraw(0)
+os.write(1, b"READY\n")
+data = b""
+while len(data) < 4:
+    data += os.read(0, 4 - len(data))
+os.write(1, b"GOT " + data.hex().encode() + b"\n")
+"#;
+    assert_ok(&h.create_session("ctrl-bytes", "python3", &["-c", probe], 80, 24));
+    assert_ok(&h.wait_for_text("ctrl-bytes", "READY", 5000));
+
+    h.send_keys("ctrl-bytes", &["ctrl-a", "ctrl-c", "ctrl-d", "ctrl-z"]);
+    assert_ok(&h.wait_for_text("ctrl-bytes", "GOT 0103041a", 5000));
+}
+
+#[test]
+fn test_ctrl_d_uses_kitty_encoding_when_enabled() {
+    let h = TestHarness::new();
+    let probe = r#"import os, tty
+tty.setraw(0)
+os.write(1, b"\x1b[>1uREADY\n")
+data = b""
+while len(data) < 8:
+    data += os.read(0, 8 - len(data))
+os.write(1, b"GOT " + data.hex().encode() + b"\n")
+"#;
+    assert_ok(&h.create_session("ctrl-d-kitty", "python3", &["-c", probe], 80, 24));
+    assert_ok(&h.wait_for_text("ctrl-d-kitty", "READY", 5000));
+
+    h.send_keys("ctrl-d-kitty", &["ctrl-d"]);
+    assert_ok(&h.wait_for_text("ctrl-d-kitty", "GOT 1b5b3130303b3575", 5000));
+}
+
+#[test]
 fn test_cursor_position() {
     let h = TestHarness::new();
     assert_ok(&h.create_session("cursor", "bash", &["--norc", "--noprofile"], 80, 24));
