@@ -7,7 +7,7 @@ use mio::unix::SourceFd;
 use mio::{Events, Interest, Poll, Token, Waker};
 use nix::sys::signal::Signal;
 use phantom_core::exit_codes;
-use phantom_core::protocol::{Response, ResponseData};
+use phantom_core::protocol::{BuildIdentity, DaemonInfo, Response, ResponseData};
 use phantom_core::types::{InputAction, ScreenFormat, WaitCondition};
 
 use crate::input;
@@ -83,6 +83,13 @@ pub enum EngineCommand {
         session: String,
         signal: Option<i32>,
         reply: Sender<Response>,
+    },
+    GetDaemonInfo {
+        build: BuildIdentity,
+        reply: Sender<Response>,
+    },
+    RunningSessionCount {
+        reply: Sender<usize>,
     },
     Shutdown,
 }
@@ -259,6 +266,16 @@ impl Engine {
             } => {
                 let resp = self.kill_session(&session, signal);
                 let _ = reply.send(resp);
+            }
+            EngineCommand::GetDaemonInfo { build, reply } => {
+                let running_sessions = self.running_session_count();
+                let _ = reply.send(Response::ok_with(ResponseData::Daemon(DaemonInfo {
+                    build,
+                    running_sessions,
+                })));
+            }
+            EngineCommand::RunningSessionCount { reply } => {
+                let _ = reply.send(self.running_session_count());
             }
             EngineCommand::Shutdown => unreachable!(),
         }
@@ -488,6 +505,12 @@ impl Engine {
     fn list_sessions(&mut self) -> Response {
         let sessions: Vec<_> = self.sessions.values_mut().map(|s| s.info()).collect();
         Response::ok_with(ResponseData::Sessions(sessions))
+    }
+
+    fn running_session_count(&mut self) -> usize {
+        self.sessions.values_mut().fold(0, |count, session| {
+            count + usize::from(session.check_exit().is_none())
+        })
     }
 
     fn get_scrollback(&mut self, session_name: &str, lines: Option<u32>) -> Response {

@@ -7,6 +7,7 @@ use tokio::net::UnixStream;
 
 pub struct Connection {
     stream: BufReader<UnixStream>,
+    peer_pid: Option<u32>,
 }
 
 impl Connection {
@@ -14,9 +15,19 @@ impl Connection {
         let stream = UnixStream::connect(socket_path)
             .await
             .with_context(|| format!("Failed to connect to daemon at {}", socket_path.display()))?;
+        let peer_pid = stream
+            .peer_cred()
+            .ok()
+            .and_then(|credentials| credentials.pid())
+            .and_then(|pid| pid.try_into().ok());
         Ok(Self {
             stream: BufReader::new(stream),
+            peer_pid,
         })
+    }
+
+    pub fn peer_pid(&self) -> Option<u32> {
+        self.peer_pid
     }
 
     pub async fn send(&mut self, request: &Request) -> Result<Response> {

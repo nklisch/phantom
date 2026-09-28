@@ -4,6 +4,24 @@ use crate::types::{
     CellData, CursorInfo, InputAction, ScreenContent, ScreenFormat, SessionInfo, WaitCondition,
 };
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BuildIdentity {
+    pub version: String,
+    pub commit: String,
+}
+
+impl std::fmt::Display for BuildIdentity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} ({})", self.version, self.commit)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DaemonInfo {
+    pub build: BuildIdentity,
+    pub running_sessions: usize,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Request {
@@ -62,6 +80,7 @@ pub enum Request {
         session: String,
         signal: Option<i32>,
     },
+    GetDaemonInfo,
     Shutdown,
 }
 
@@ -87,6 +106,7 @@ pub enum ResponseData {
     Cursor(CursorInfo),
     Cell(CellData),
     Text(String),
+    Daemon(DaemonInfo),
 }
 
 impl Response {

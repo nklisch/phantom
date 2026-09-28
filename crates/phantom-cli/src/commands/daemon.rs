@@ -47,20 +47,17 @@ pub async fn status() -> Result<()> {
     let path = daemon_ctl::socket_path();
     match crate::connection::Connection::connect(&path).await {
         Ok(mut conn) => {
-            // Try listing sessions to confirm the daemon is responsive
             match conn
-                .send(&phantom_core::protocol::Request::ListSessions)
+                .send(&phantom_core::protocol::Request::GetDaemonInfo)
                 .await
             {
-                Ok(phantom_core::protocol::Response::Ok { data }) => {
-                    let session_count = match &data {
-                        Some(phantom_core::protocol::ResponseData::Sessions(s)) => s.len(),
-                        _ => 0,
-                    };
+                Ok(phantom_core::protocol::Response::Ok {
+                    data: Some(phantom_core::protocol::ResponseData::Daemon(info)),
+                }) => {
                     println!("Daemon is running");
                     println!("  socket:   {}", path.display());
-                    println!("  version:  {}", env!("CARGO_PKG_VERSION"));
-                    println!("  sessions: {session_count}");
+                    println!("  build:    {}", info.build);
+                    println!("  sessions: {} running", info.running_sessions);
                 }
                 _ => {
                     println!("Daemon is running (socket: {})", path.display());

@@ -2,6 +2,7 @@ use phantom_daemon::{engine, listener};
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Result;
 use clap::Parser;
@@ -17,6 +18,14 @@ struct Args {
     /// Run in foreground (don't daemonize)
     #[arg(long)]
     foreground: bool,
+
+    /// Exit when this process is no longer running
+    #[arg(long)]
+    owner_pid: Option<u32>,
+
+    /// Exit after this many idle seconds with no running sessions (0 disables)
+    #[arg(long, default_value = "1800")]
+    idle_timeout_secs: u64,
 }
 
 fn main() -> Result<()> {
@@ -64,28 +73,42 @@ fn main() -> Result<()> {
         .enable_all()
         .build()?;
 
-    rt.block_on(async {
-        let cmd_tx_signal = cmd_tx.clone();
-        let waker_signal = Arc::clone(&waker);
-        let socket_path_signal = socket_path.clone();
-        tokio::spawn(async move {
-            let _ = tokio::signal::ctrl_c().await;
-            tracing::info!("Received shutdown signal");
-            let _ = cmd_tx_signal.send(engine::EngineCommand::Shutdown);
-            let _ = waker_signal.wake();
-            let _ = std::fs::remove_file(&socket_path_signal);
-            std::process::exit(0);
-        });
+    let lifecycle = listener::Lifecycle {
+        owner_pid: args.owner_pid,
+        idle_timeout: (args.idle_timeout_secs > 0)
+            .then(|| Duration::from_secs(args.idle_timeout_secs)),
+    };
+    let build = phantom_daemon::build_identity();
 
-        if let Err(e) = listener::listen(&socket_path, cmd_tx, waker).await {
-            tracing::error!("Listener error: {e}");
+    let listen_result = rt.block_on(async {
+        let mut terminate =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+        tokio::select! {
+            result = listener::listen(
+                &socket_path,
+                cmd_tx.clone(),
+                Arc::clone(&waker),
+                build,
+                lifecycle,
+            ) => result,
+            _ = tokio::signal::ctrl_c() => {
+                tracing::info!("Received interrupt signal");
+                Ok(())
+            },
+            _ = terminate.recv() => {
+                tracing::info!("Received termination signal");
+                Ok(())
+            },
         }
     });
+
+    let _ = cmd_tx.send(engine::EngineCommand::Shutdown);
+    let _ = waker.wake();
 
     let _ = engine_handle.join();
     let _ = std::fs::remove_file(&socket_path);
 
-    Ok(())
+    listen_result
 }
 
 fn default_socket_path() -> PathBuf {

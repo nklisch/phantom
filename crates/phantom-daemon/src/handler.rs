@@ -3,7 +3,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use crossbeam_channel::Sender;
 use mio::Waker;
-use phantom_core::protocol::{Request, Response};
+use phantom_core::protocol::{BuildIdentity, Request, Response};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 
@@ -13,6 +13,8 @@ pub async fn handle_connection(
     stream: UnixStream,
     cmd_tx: Sender<EngineCommand>,
     waker: Arc<Waker>,
+    build: BuildIdentity,
+    shutdown_tx: Option<tokio::sync::mpsc::Sender<()>>,
 ) -> Result<()> {
     let mut reader = BufReader::new(stream);
     let mut line = String::new();
@@ -30,12 +32,22 @@ pub async fn handle_connection(
             }
         };
 
-        let response = dispatch_request(request, &cmd_tx, &waker).await?;
+        let shutdown_requested = matches!(request, Request::Shutdown);
+        let response = dispatch_request(request, &cmd_tx, &waker, &build).await?;
 
         let mut buf = serde_json::to_vec(&response)?;
         buf.push(b'\n');
         reader.get_mut().write_all(&buf).await?;
         reader.get_mut().flush().await?;
+        if shutdown_requested {
+            if let Some(tx) = &shutdown_tx {
+                let _ = tx.send(()).await;
+            } else {
+                let _ = cmd_tx.send(EngineCommand::Shutdown);
+                let _ = waker.wake();
+            }
+            return Ok(());
+        }
         line.clear();
     }
 
@@ -46,6 +58,7 @@ async fn dispatch_request(
     request: Request,
     cmd_tx: &Sender<EngineCommand>,
     waker: &Waker,
+    build: &BuildIdentity,
 ) -> Result<Response> {
     let (reply_tx, reply_rx) = crossbeam_channel::bounded(1);
 
@@ -136,9 +149,11 @@ async fn dispatch_request(
             signal,
             reply: reply_tx,
         },
+        Request::GetDaemonInfo => EngineCommand::GetDaemonInfo {
+            build: build.clone(),
+            reply: reply_tx,
+        },
         Request::Shutdown => {
-            let _ = cmd_tx.send(EngineCommand::Shutdown);
-            let _ = waker.wake();
             return Ok(Response::ok());
         }
     };
