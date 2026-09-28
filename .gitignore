@@ -16,3 +16,6 @@ Thumbs.db
 # Environment
 .env
 .env.*
+
+# Local agent job metadata
+.peeragent/
