@@ -33,24 +33,20 @@ fn echo_and_screenshot() {
 }
 
 #[test]
-fn session_not_found() {
+fn killed_session_reports_exit() {
     let pt = Phantom::new().unwrap();
-    // Create and kill a session, then try to query it via a new Phantom
-    // that doesn't have this session. Simplest: just query a name that was
-    // never created, using the low-level sessions() + status on the session handle.
     let s = pt
-        .run("bash")
-        .args(&["--norc", "--noprofile"])
+        // Interactive bash deliberately ignores SIGTERM, which is the signal
+        // Session::kill sends. Use a process that obeys SIGTERM when testing
+        // the engine's kill, reap and exited-status path.
+        .run("sleep")
+        .args(&["999"])
         .name("will_kill")
         .start()
         .unwrap();
     s.kill().unwrap();
     s.wait().process_exit().until().unwrap();
 
-    // Now try to screenshot the dead-but-still-registered session — it should work.
-    // But querying a truly nonexistent name requires a different approach.
-    // We'll test the error by trying to create a session, killing its process,
-    // and confirming the status shows exited.
     let info = s.status().unwrap();
     assert!(matches!(info.status, SessionStatus::Exited { .. }));
 }
