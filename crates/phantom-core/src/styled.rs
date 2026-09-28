@@ -1,10 +1,11 @@
 //! Compact, model-readable terminal capture with style runs.
 
+use std::collections::HashMap;
 use std::fmt::Write;
 
 use crate::types::{CellData, ScreenContent};
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 struct Style {
     fg: Option<String>,
     bg: Option<String>,
@@ -59,8 +60,13 @@ impl Style {
 /// Format a styled capture.
 ///
 /// Row text is JSON-escaped. Style ranges are half-open captured-cell indices;
-/// default cells are omitted and adjacent cells with the same style are one run.
-/// Rows with no text and no styled cells are omitted.
+/// adjacent cells with the same style are one run. The painted background (the
+/// most common style of blank cells) is reported once as `base` when it isn't
+/// the terminal default, and
+/// only cells that differ from it get runs; a run in the terminal default
+/// style on a styled base reads `default`. Rows with no text beyond base-styled
+/// spaces and no runs are omitted, so a TUI that paints its whole background
+/// costs no more than a blank screen.
 pub fn format(screen: &ScreenContent) -> String {
     let mut out = format!(
         "screen {}x{}\ncursor {},{} {}",
@@ -74,6 +80,11 @@ pub fn format(screen: &ScreenContent) -> String {
             "hidden"
         }
     );
+    let base = base_style(screen);
+    if !base.is_default() {
+        out.push_str("\nbase");
+        base.write_to(&mut out);
+    }
 
     for row in &screen.screen {
         let text = if row.cells.is_empty() {
@@ -82,7 +93,7 @@ pub fn format(screen: &ScreenContent) -> String {
             let end = row
                 .cells
                 .iter()
-                .rposition(|cell| cell.grapheme != " " || !Style::from_cell(cell).is_default())
+                .rposition(|cell| cell.grapheme != " " || Style::from_cell(cell) != base)
                 .map_or(0, |index| index + 1);
             row.cells[..end]
                 .iter()
@@ -97,9 +108,13 @@ pub fn format(screen: &ScreenContent) -> String {
             while end < row.cells.len() && Style::from_cell(&row.cells[end]) == style {
                 end += 1;
             }
-            if !style.is_default() {
+            if style != base {
                 write!(runs, "\n  {start}..{end}").unwrap();
-                style.write_to(&mut runs);
+                if style.is_default() {
+                    runs.push_str(" default");
+                } else {
+                    style.write_to(&mut runs);
+                }
             }
             start = end;
         }
@@ -118,6 +133,27 @@ pub fn format(screen: &ScreenContent) -> String {
     }
 
     out
+}
+
+/// The painted background: the most common style among blank cells. Text
+/// colours never become the base. Ties go to the terminal default, then to
+/// the style seen first, so the result is deterministic.
+fn base_style(screen: &ScreenContent) -> Style {
+    let mut counts: HashMap<Style, (usize, usize)> = HashMap::new();
+    let blank_cells = screen
+        .screen
+        .iter()
+        .flat_map(|row| &row.cells)
+        .filter(|cell| cell.grapheme.trim().is_empty());
+    for (seen, cell) in blank_cells.enumerate() {
+        counts.entry(Style::from_cell(cell)).or_insert((0, seen)).0 += 1;
+    }
+    let default_count = counts.get(&Style::default()).map_or(0, |(count, _)| *count);
+    counts
+        .into_iter()
+        .filter(|(_, (count, _))| *count > default_count)
+        .max_by_key(|(_, (count, seen))| (*count, std::cmp::Reverse(*seen)))
+        .map_or_else(Style::default, |(style, _)| style)
 }
 
 fn color_to_hex(color: &str) -> Option<String> {
@@ -214,7 +250,14 @@ mod tests {
                 RowContent {
                     row: 0,
                     text: String::new(),
-                    cells: vec![red_bold.clone(), red_bold, cell(" "), all_attributes],
+                    cells: vec![
+                        red_bold.clone(),
+                        red_bold,
+                        cell(" "),
+                        all_attributes,
+                        cell(" "),
+                        cell(" "),
+                    ],
                 },
                 RowContent {
                     row: 1,
@@ -232,6 +275,46 @@ mod tests {
         assert_eq!(
             format(&screen),
             "screen 8x3\ncursor 3,1 hidden\nrow 0: \"AA C\"\n  0..2 fg=#aa0000 bold\n  3..4 bg=#a1b2c3 italic underline strikethrough inverse dim\nrow 2: \"quote: \\\"\""
+        );
+    }
+
+    #[test]
+    fn a_painted_background_is_reported_once_as_base() {
+        let painted = |grapheme: &str| {
+            let mut c = cell(grapheme);
+            c.fg = Some("#E6E0D6".into());
+            c.bg = Some("#191C1E".into());
+            c
+        };
+        let mut copper = painted("o");
+        copper.fg = Some("#D89B73".into());
+        copper.bold = true;
+        let row = |row: u16, cells: Vec<CellData>| RowContent {
+            row,
+            text: String::new(),
+            cells,
+        };
+        let blank = || (0..6).map(|_| painted(" ")).collect::<Vec<_>>();
+        let mut titled = blank();
+        titled[1] = copper.clone();
+        titled[2] = copper;
+        titled[4] = cell("x");
+        let screen = ScreenContent {
+            cols: 6,
+            rows: 3,
+            cursor: CursorInfo {
+                x: 0,
+                y: 0,
+                visible: true,
+                style: CursorStyle::Block,
+            },
+            title: None,
+            screen: vec![row(0, titled), row(1, blank()), row(2, blank())],
+        };
+
+        assert_eq!(
+            format(&screen),
+            "screen 6x3\ncursor 0,0 visible\nbase fg=#e6e0d6 bg=#191c1e\nrow 0: \" oo x\"\n  1..3 fg=#d89b73 bg=#191c1e bold\n  4..5 default"
         );
     }
 }

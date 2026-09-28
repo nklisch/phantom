@@ -197,7 +197,7 @@ Tools exposed: `phantom_run`, `phantom_send`, `phantom_wait`, `phantom_screensho
 
 ### Styled screenshots
 
-`--format styled` preserves color and emphasis without the token cost of a PNG. Its line-oriented format starts with the full screen size and absolute cursor position/visibility, then gives every captured row that has text or styling as a JSON-escaped string (blank, unstyled rows are omitted). Indented lines are non-default style runs:
+`--format styled` preserves color and emphasis without the token cost of a PNG. Its line-oriented format starts with the full screen size and absolute cursor position/visibility. When a TUI paints its own background, the most common style of blank cells is given once as `base`; text colors never become the base. Then every captured row with text beyond base-styled spaces, or with styled cells, is given as a JSON-escaped string; other rows are omitted. Indented lines are runs of cells whose style differs from `base`:
 
 ```text
 screen 80x24
@@ -207,7 +207,18 @@ row 0: "plain red bold"
   10..14 fg=#aa0000 bold
 ```
 
-Run ranges are half-open captured-row-relative cell indices (`start..end`), including in a regional capture. Foreground (`fg`) and background (`bg`) colors are lowercase `#rrggbb`; flags are `bold`, `italic`, `underline`, `strikethrough`, `inverse`, and `dim`. Adjacent cells with identical styles share a run, and default styling is omitted. Row numbers and the cursor remain absolute screen coordinates. `--region top,left,bottom,right` uses 0-indexed inclusive bounds.
+On a painted background:
+
+```text
+screen 120x36
+cursor 58,30 hidden
+base fg=#e6e0d6 bg=#191c1e
+row 0: " orogen ▸ New conversation"
+  1..10 fg=#d89b73 bg=#14171a bold
+  10..26 fg=#b8b1a6 bg=#14171a
+```
+
+Run ranges are half-open captured-row-relative cell indices (`start..end`), including in a regional capture. Foreground (`fg`) and background (`bg`) colors are lowercase `#rrggbb`; flags are `bold`, `italic`, `underline`, `strikethrough`, `inverse`, and `dim`. Adjacent cells with identical styles share a run. Each run gives its full style, and `default` marks a run with no colors or emphasis on a styled base. Row numbers and the cursor remain absolute screen coordinates. `--region top,left,bottom,right` uses 0-indexed inclusive bounds.
 
 ## Exit Codes
 
