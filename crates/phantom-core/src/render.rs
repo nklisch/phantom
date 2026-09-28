@@ -3,6 +3,7 @@
 //! the `image` crate for PNG encoding.
 //!
 //! Font: JetBrains Mono Regular (SIL OFL 1.1) — vendored under `assets/`.
+//! Braille and U+25AC are drawn procedurally because the font omits them.
 
 use std::io::Cursor;
 use std::sync::OnceLock;
@@ -97,7 +98,7 @@ pub fn render_png(screen: &ScreenContent, region: Option<Region>) -> Result<Vec<
             for (col_idx, ch) in row.text.chars().enumerate() {
                 let col_x = PADDING + (col_idx as u32) * m.cell_w;
                 fill_rect(&mut img, col_x, row_y, m.cell_w, m.cell_h, BG_DEFAULT);
-                draw_glyph(&mut img, f, col_x, row_y, ch, FG_DEFAULT, m);
+                draw_terminal_glyph(&mut img, f, col_x, row_y, ch, FG_DEFAULT, m);
             }
         }
     }
@@ -125,13 +126,64 @@ fn draw_cell(img: &mut RgbaImage, f: &Font, m: &Metrics, x: u32, y: u32, cell: &
 
     let ch = cell.grapheme.chars().next().unwrap_or(' ');
     if ch != ' ' && ch != '\0' {
-        draw_glyph(img, f, x, y, ch, fg, m);
+        draw_terminal_glyph(img, f, x, y, ch, fg, m);
     }
     if cell.underline {
         draw_underline(img, x, y, m, fg);
     }
     if cell.strikethrough {
         draw_strikethrough(img, x, y, m, fg);
+    }
+}
+
+fn draw_terminal_glyph(
+    img: &mut RgbaImage,
+    font: &Font,
+    x: u32,
+    y: u32,
+    ch: char,
+    color: Rgba<u8>,
+    metrics: &Metrics,
+) {
+    match ch {
+        '\u{2800}'..='\u{28ff}' => draw_braille(img, x, y, ch, color, metrics),
+        '▬' => {
+            let width = (metrics.cell_w * 4 / 5).max(2);
+            let height = (metrics.cell_h / 6).max(2);
+            fill_rect(
+                img,
+                x + (metrics.cell_w - width) / 2,
+                y + (metrics.cell_h - height) / 2,
+                width,
+                height,
+                color,
+            );
+        }
+        _ => draw_glyph(img, font, x, y, ch, color, metrics),
+    }
+}
+
+fn draw_braille(img: &mut RgbaImage, x: u32, y: u32, ch: char, color: Rgba<u8>, metrics: &Metrics) {
+    let pattern = ch as u32 - 0x2800;
+    let dot_size = (metrics.cell_w / 5).max(1);
+    let left = x + metrics.cell_w / 4;
+    let right = x + metrics.cell_w * 3 / 4;
+    let dot_x = [left, left, left, right, right, right, left, right];
+    let dot_row = [0, 1, 2, 0, 1, 2, 3, 3];
+
+    for dot in 0..8 {
+        if pattern & (1 << dot) == 0 {
+            continue;
+        }
+        let center_y = y + metrics.cell_h * (dot_row[dot] * 2 + 1) / 8;
+        fill_rect(
+            img,
+            dot_x[dot].saturating_sub(dot_size / 2),
+            center_y.saturating_sub(dot_size / 2),
+            dot_size,
+            dot_size,
+            color,
+        );
     }
 }
 
@@ -376,5 +428,46 @@ mod tests {
         let m = metrics();
         assert_eq!(img.width(), 11 * m.cell_w + 2 * PADDING);
         assert_eq!(img.height(), 6 * m.cell_h + 2 * PADDING);
+    }
+
+    fn glyph_pixels(ch: char) -> Vec<bool> {
+        let mut screen = make_screen(1, 1, &[]);
+        screen.screen.push(RowContent {
+            row: 0,
+            text: ch.to_string(),
+            cells: vec![CellData {
+                grapheme: ch.to_string(),
+                fg: None,
+                bg: None,
+                bold: false,
+                italic: false,
+                underline: false,
+                strikethrough: false,
+                inverse: false,
+                faint: false,
+            }],
+        });
+        let png = render_png(&screen, None).expect("render");
+        let image = image::load_from_memory(&png).expect("decode").to_rgba8();
+        let m = metrics();
+        (PADDING..PADDING + m.cell_h)
+            .flat_map(|y| {
+                let image = &image;
+                (PADDING..PADDING + m.cell_w).map(move |x| *image.get_pixel(x, y) != BG_DEFAULT)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn terminal_symbols_render_as_real_glyphs() {
+        let missing = glyph_pixels('\u{10ffff}');
+        for ch in ['⠋', '█', '┌', '▲', '◆', '◇', '▸', '▬', '✓', '✗', '⊘'] {
+            let pixels = glyph_pixels(ch);
+            assert!(pixels.iter().any(|set| *set), "{ch} rendered no pixels");
+            assert_ne!(
+                pixels, missing,
+                "{ch} rendered as the missing-glyph placeholder"
+            );
+        }
     }
 }

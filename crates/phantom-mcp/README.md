@@ -143,7 +143,8 @@ Screenshots requested with `format: "image"` are rendered to PNG by
 per-cell foreground, background, bold, faint, italic, inverse, underline,
 and strikethrough. Color formats supported: `#rrggbb` and `palette:N`
 (xterm 256-color). The same renderer backs `phantom screenshot --format image`
-in the CLI.
+in the CLI. Braille patterns and U+25AC (`▬`), which JetBrains Mono omits,
+are drawn procedurally; no additional font or license is bundled.
 
 ## Development
 
